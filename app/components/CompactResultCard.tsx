@@ -69,7 +69,9 @@ export default function CompactResultCard({
                 <line x1="8" y1="2" x2="8" y2="6"></line>
                 <line x1="3" y1="10" x2="21" y2="10"></line>
               </svg>
-              {input.fromDate} — {input.toDate}
+              {input.fromDate === input.toDate 
+                ? (input.fromDate === new Date().toISOString().split('T')[0] ? `${input.fromDate} (Realtime Live)` : input.fromDate)
+                : `${input.fromDate} — ${input.toDate}`}
             </div>
           </div>
         </div>

@@ -1,9 +1,19 @@
+/**
+ * lib/brokers.ts - Institutional Broker Proxy Directory (SmartMoney AI)
+ * 
+ * DISCLAIMER & REGULATORY GOVERNANCE:
+ * Data publik BEI hanya digunakan sebagai PROXY perilaku aliran dana (order flow proxy).
+ * Klasifikasi ini BUKAN kepastian identitas atau niat bandar, melainkan pengelompokan
+ * profil historis tipe nasabah dominan pada masing-masing sekuritas.
+ */
+
 export type BrokerType = 'Smartmoney' | 'Whale' | 'Retail' | 'Mix' | 'Unknown';
 
 export interface BrokerInfo {
   code: string;
   name: string;
   type: BrokerType;
+  proxyLabel?: string; // Scientific proxy label (e.g., 'Smart Money Proxy', 'Institutional Foreign Proxy')
 }
 
 export const BROKERS: Record<string, BrokerInfo> = {
@@ -107,6 +117,34 @@ export const BROKERS: Record<string, BrokerInfo> = {
   "YP": { code: "YP", name: "Mirae Asset Sekuritas Indonesia", type: "Mix" },
 };
 
+export const getProxyLabelForType = (type: BrokerType): string => {
+  switch (type) {
+    case 'Smartmoney':
+      return 'Smart Money Proxy';
+    case 'Whale':
+      return 'Institutional Foreign / Whale Proxy';
+    case 'Retail':
+      return 'Retail Flow Proxy';
+    case 'Mix':
+      return 'Mixed Institutional / Retail Flow';
+    default:
+      return 'Unclassified Broker Flow';
+  }
+};
+
 export const getBrokerInfo = (code: string): BrokerInfo => {
-  return BROKERS[code.toUpperCase()] || { code, name: "Unknown Broker", type: "Unknown" };
+  const upper = (code || '').toUpperCase();
+  const found = BROKERS[upper];
+  if (found) {
+    return {
+      ...found,
+      proxyLabel: found.proxyLabel || getProxyLabelForType(found.type),
+    };
+  }
+  return {
+    code: upper,
+    name: 'Unknown Broker',
+    type: 'Unknown',
+    proxyLabel: 'Unclassified Broker Flow',
+  };
 };

@@ -1,5 +1,6 @@
-import type { MarketDetectorResponse, OrderbookResponse, BrokerData, WatchlistResponse, BrokerSummaryData, EmitenInfoResponse, KeyStatsResponse, KeyStatsData, KeyStatsItem, WatchlistGroup, RunningTradeChartResponse } from './types';
+import type { MarketDetectorResponse, OrderbookResponse, OrderbookData, BrokerData, WatchlistResponse, BrokerSummaryData, EmitenInfoResponse, KeyStatsResponse, KeyStatsData, KeyStatsItem, WatchlistGroup, RunningTradeChartResponse, RunningTradeChartData } from './types';
 import { getSessionValue, updateTokenLastUsed, invalidateToken } from './supabase';
+import { type DataEnvelope, createConfirmedEnvelope, createUnavailableEnvelope } from './data-truth';
 
 const STOCKBIT_BASE_URL = 'https://exodus.stockbit.com';
 const STOCKBIT_AUTH_URL = 'https://stockbit.com';
@@ -36,23 +37,27 @@ async function getAuthToken(): Promise<string> {
     return cachedToken;
   }
 
-  // Fetch from database
-  const token = await getSessionValue('stockbit_token');
-
-  // Fallback to env if database token not found
-  if (!token) {
-    const envToken = process.env.STOCKBIT_JWT_TOKEN;
-    if (!envToken) {
-      throw new Error('STOCKBIT_JWT_TOKEN not found in database or environment');
-    }
-    return envToken;
+  // Check env first if set
+  const envToken = process.env.STOCKBIT_JWT_TOKEN;
+  if (envToken) {
+    const cleanToken = envToken.replace(/^Bearer\s+/i, '').trim();
+    cachedToken = cleanToken;
+    tokenLastFetched = now;
+    return cleanToken;
   }
 
+  // Fetch from database
+  const token = await getSessionValue('stockbit_token');
+  if (!token) {
+    throw new Error('STOCKBIT_JWT_TOKEN not found in database or environment');
+  }
+
+  const cleanToken = token.replace(/^Bearer\s+/i, '').trim();
   // Update cache
-  cachedToken = token;
+  cachedToken = cleanToken;
   tokenLastFetched = now;
 
-  return token;
+  return cleanToken;
 }
 
 /**
@@ -293,11 +298,12 @@ export function getTopBroker(marketDetectorData: MarketDetectorResponse): Broker
 }
 
 /**
- * Helper to parse lot string (e.g., "25,322,000" -> 25322000)
+ * Helper to parse lot string or number (e.g., "25,322,000" or 25322000 -> 25322000)
  */
-export function parseLot(lotStr: string): number {
+export function parseLot(lotStr: string | number | undefined | null): number {
+  if (typeof lotStr === 'number') return Math.round(lotStr);
   if (!lotStr) return 0;
-  return Number(lotStr.replace(/,/g, ''));
+  return Number(String(lotStr).replace(/,/g, '')) || 0;
 }
 
 /**
@@ -453,3 +459,85 @@ export async function deleteWatchlistItem(watchlistId: number, companyId: number
 
   await handleApiResponse(response, 'Delete Watchlist Item API');
 }
+
+/**
+ * Enveloped fetcher for Orderbook with canonical truth metadata.
+ */
+export async function fetchOrderbookEnveloped(emiten: string): Promise<DataEnvelope<OrderbookData>> {
+  const t0 = Date.now();
+  try {
+    const raw = await fetchOrderbook(emiten);
+    if (!raw?.data) {
+      return createUnavailableEnvelope('STOCKBIT_ORDERBOOK', 'REST_API', 'SOURCE_FIELD_MISSING');
+    }
+    return createConfirmedEnvelope(raw.data, 'STOCKBIT_ORDERBOOK', 'REST_API', {
+      asOf: new Date(),
+      freshnessSec: Math.round((Date.now() - t0) / 1000),
+      dataMode: 'LIVE',
+    });
+  } catch (err: any) {
+    return createUnavailableEnvelope(
+      'STOCKBIT_ORDERBOOK',
+      'REST_API',
+      err instanceof TokenExpiredError ? 'TOKEN_EXPIRED' : (err?.message || 'FEED_DISCONNECTED')
+    );
+  }
+}
+
+/**
+ * Enveloped fetcher for Market Detector with canonical truth metadata.
+ */
+export async function fetchMarketDetectorEnveloped(
+  emiten: string,
+  fromDate: string,
+  toDate: string
+): Promise<DataEnvelope<MarketDetectorResponse>> {
+  const t0 = Date.now();
+  try {
+    const raw = await fetchMarketDetector(emiten, fromDate, toDate);
+    if (!raw?.data) {
+      return createUnavailableEnvelope('STOCKBIT_MARKETDETECTOR', 'REST_API', 'SOURCE_FIELD_MISSING');
+    }
+    return createConfirmedEnvelope(raw, 'STOCKBIT_MARKETDETECTOR', 'REST_API', {
+      asOf: toDate,
+      freshnessSec: Math.round((Date.now() - t0) / 1000),
+      dataMode: fromDate === toDate ? 'LIVE' : 'EOD',
+    });
+  } catch (err: any) {
+    return createUnavailableEnvelope(
+      'STOCKBIT_MARKETDETECTOR',
+      'REST_API',
+      err instanceof TokenExpiredError ? 'TOKEN_EXPIRED' : (err?.message || 'FEED_DISCONNECTED')
+    );
+  }
+}
+
+/**
+ * Enveloped fetcher for Running Trade Chart with canonical truth metadata.
+ */
+export async function fetchRunningTradeChartEnveloped(
+  emiten: string,
+  brokerCodes: string[],
+  fromDate: string,
+  toDate: string
+): Promise<DataEnvelope<RunningTradeChartData>> {
+  const t0 = Date.now();
+  try {
+    const raw = await fetchRunningTradeChartByBrokers(emiten, brokerCodes, fromDate, toDate);
+    if (!raw?.data) {
+      return createUnavailableEnvelope('STOCKBIT_RUNNING_TRADE_CHART', 'REST_API', 'SOURCE_FIELD_MISSING');
+    }
+    return createConfirmedEnvelope(raw.data, 'STOCKBIT_RUNNING_TRADE_CHART', 'REST_API', {
+      asOf: toDate,
+      freshnessSec: Math.round((Date.now() - t0) / 1000),
+      dataMode: 'EOD',
+    });
+  } catch (err: any) {
+    return createUnavailableEnvelope(
+      'STOCKBIT_RUNNING_TRADE_CHART',
+      'REST_API',
+      err instanceof TokenExpiredError ? 'TOKEN_EXPIRED' : (err?.message || 'FEED_DISCONNECTED')
+    );
+  }
+}
+

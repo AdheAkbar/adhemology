@@ -1,22 +1,17 @@
+import { getIdxTickSize, snapToIdxTick } from './config/idx-fraksi-config';
+
 /**
- * Calculate Fraksi based on stock price
- * Rules:
- * - < 200: Fraksi 1
- * - 200-499: Fraksi 2
- * - 500-1999: Fraksi 5
- * - 2000-4999: Fraksi 10
- * - >= 5000: Fraksi 25
+ * Calculate Fraksi based on stock price using the active IDX regulation.
+ * Maintained as an alias for full backward compatibility.
  */
-export function getFraksi(harga: number): number {
-  if (harga < 200) return 1;
-  if (harga >= 200 && harga < 500) return 2;
-  if (harga >= 500 && harga < 2000) return 5;
-  if (harga >= 2000 && harga < 5000) return 10;
-  return 25; // harga >= 5000
+export function getFraksi(harga: number, asOfDate?: string | Date): number {
+  return getIdxTickSize(harga, asOfDate);
 }
 
 /**
- * Calculate target prices based on broker and market data
+ * Calculate heuristic baseline target prices based on legacy Adimology methodology (Adi Sucipto).
+ * NOTE: These are empirical heuristic targets used as baseline benchmarks,
+ * NOT guaranteed distribution levels or certainty claims.
  */
 export function calculateTargets(
   rataRataBandar: number,
@@ -25,28 +20,29 @@ export function calculateTargets(
   arb: number,
   totalBid: number,
   totalOffer: number,
-  harga: number
+  harga: number,
+  asOfDate?: string | Date
 ) {
   // Calculate Fraksi
-  const fraksi = getFraksi(harga);
+  const fraksi = getFraksi(harga, asOfDate);
 
   // Total Papan = (ARA - ARB) / Fraksi
-  const totalPapan = (ara - arb) / fraksi;
+  const totalPapan = Math.max(1, (ara - arb) / fraksi);
 
   // Rata rata Bid Ofer = (Total Bid + Total Offer) / Total Papan
-  const rataRataBidOfer = (totalBid + totalOffer) / totalPapan;
+  const rataRataBidOfer = Math.max(1, (totalBid + totalOffer) / totalPapan);
 
-  // a = Rata rata bandar × 5%
+  // a = Rata rata bandar × 5% (heuristic minimum profit margin proxy)
   const a = rataRataBandar * 0.05;
 
-  // p = Barang Bandar / Rata rata Bid Ofer
+  // p = Barang Bandar / Rata rata Bid Ofer (heuristic depth absorption proxy)
   const p = barangBandar / rataRataBidOfer;
 
   // Target Realistis = Rata rata bandar + a + (p/2 × Fraksi)
-  const targetRealistis1 = rataRataBandar + a + ((p / 2) * fraksi);
+  const targetRealistis1 = snapToIdxTick(rataRataBandar + a + ((p / 2) * fraksi), 'NEAREST', asOfDate);
 
   // Target Max = Rata rata bandar + a + (p × Fraksi)
-  const targetMax = rataRataBandar + a + (p * fraksi);
+  const targetMax = snapToIdxTick(rataRataBandar + a + (p * fraksi), 'NEAREST', asOfDate);
 
   return {
     fraksi,

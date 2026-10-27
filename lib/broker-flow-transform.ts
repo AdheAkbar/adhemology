@@ -79,11 +79,13 @@ export function transformRunningTradeChartToBrokerFlow(
     for (const date of orderedDates) {
       const cumulative = cumByDate.get(date) as number;
       const netForDay = cumulative - prevCumulative;
+      const priceVal = priceByDate.has(date) ? priceByDate.get(date)! : null;
       dailyData.push({
         d: date,
         n: netForDay,
-        p: priceByDate.get(date) ?? 0,
-        a: 0,
+        p: priceVal,
+        a: null,
+        quality: priceVal !== null ? 'CONFIRMED' : 'DEGRADED',
       });
       prevCumulative = cumulative;
     }

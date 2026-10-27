@@ -116,6 +116,13 @@ export interface StockAnalysisResult {
   isFromHistory?: boolean;
   historyDate?: string;
   sector?: string;
+  targetLadder?: import('@/lib/targets/types').TargetLadder;
+  calibratedProbability?: import('@/lib/calibration/types').CalibratedProbability;
+  liquidityAssessment?: import('@/lib/execution/types').LiquidityAssessment;
+  accumulationProxy?: import('@/lib/accumulation/types').AccumulationProxyResult;
+  entryRiskPlan?: import('@/lib/execution/entry-risk-engine').EntryCandidate;
+  quantDecision?: import('@/lib/decisions/decision-gate').DecisionGateOutput;
+  decisionGateV2?: import('@/lib/decisions/decision-gate-v2').DecisionGateV2Output;
 }
 
 export interface ApiResponse {
@@ -277,8 +284,9 @@ export interface AgentStoryResult {
 export interface BrokerFlowDailyData {
   d: string;        // Date (YYYY-MM-DD)
   n: number;        // Net value
-  p: number;        // Price
-  a: number;        // Average (0 if selling)
+  p: number | null; // Price (null if missing from feed, not coerced to 0)
+  a: number | null; // Average (0 if selling, null if missing)
+  quality?: 'CONFIRMED' | 'DEGRADED' | 'UNAVAILABLE';
 }
 
 export interface BrokerFlowActivity {

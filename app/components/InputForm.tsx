@@ -98,16 +98,17 @@ export default function InputForm({
     const end = new Date();
     const start = new Date();
 
-    // If days is 0 (1D), it means just today for both
-    if (days === 0) {
-      // both are today, already default
-      // but maybe we want to force reset to today
-    } else {
+    if (days > 0) {
       start.setDate(end.getDate() - days);
     }
 
-    // Format YYYY-MM-DD
-    const formatDate = (d: Date) => d.toISOString().split('T')[0];
+    // Format YYYY-MM-DD in local time
+    const formatDate = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
 
     onDateChange(formatDate(start), formatDate(end));
   };

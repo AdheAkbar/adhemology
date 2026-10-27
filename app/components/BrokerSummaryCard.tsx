@@ -175,7 +175,7 @@ export default function BrokerSummaryCard({ emiten, dateRange, brokerSummary, se
             </tr>
             <tr>
               <td className="row-label">Average (Rp)</td>
-              <td colSpan={3} className="num-wide">{Math.round(detector.average)}</td>
+              <td colSpan={3} className="num-wide">{detector.average ? Math.round(detector.average).toLocaleString() : '-'}</td>
               <td></td>
             </tr>
           </tbody>

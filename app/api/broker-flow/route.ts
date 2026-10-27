@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchMarketDetector, fetchRunningTradeChartByBrokers } from '@/lib/stockbit';
 import { transformRunningTradeChartToBrokerFlow, pickTopBrokerCodes, finalizeBrokerFlow } from '@/lib/broker-flow-transform';
+import { synthesizeHybridFlowReport } from '@/lib/broker-flow';
 import type { BrokerFlowPeriod, BrokerFlowResponse } from '@/lib/types';
 
 const VALID_PERIODS: BrokerFlowPeriod[] = ['1D', '7D', '14D', '21D'];
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
     : '7D';
 
   try {
-    const emitenUpper = emiten.toUpperCase();
+    const emitenUpper = emiten.trim().toUpperCase();
 
     const toDate = mostRecentCompletedDay(jakartaNow());
     const to = toDateString(toDate);
@@ -73,9 +74,24 @@ export async function GET(request: NextRequest) {
     const brokerStatusFilter = brokerStatus.split(',').map(s => s.trim()).filter(Boolean);
     data = finalizeBrokerFlow(data, brokerStatusFilter, TOP_N_BROKERS);
 
+    // Compute Hybrid Flow Analysis (ADI, Flow Regime, Concentration, Bandar VWAP)
+    const buyers = marketDetector.data?.broker_summary?.brokers_buy || [];
+    const sellers = marketDetector.data?.broker_summary?.brokers_sell || [];
+    const currentPrice = Number(data.activities[0]?.current_price) || 0;
+
+    const hybridFlow = synthesizeHybridFlowReport({
+      emiten: emitenUpper,
+      currentPrice,
+      buyers,
+      sellers,
+      dataMode: 'EOD',
+      asOf: to,
+    });
+
     return NextResponse.json({
       success: true,
       data,
+      hybrid_flow: hybridFlow,
     });
   } catch (error) {
     console.error('Broker Flow API error:', error);

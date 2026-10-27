@@ -9,6 +9,9 @@ import AgentStoryCard from './AgentStoryCard';
 import PriceGraph from './PriceGraph';
 import BrokerFlowCard from './BrokerFlowCard';
 import EmitenHistoryCard from './EmitenHistoryCard';
+import BaselineBenchmarkCard from './BaselineBenchmarkCard';
+import QuantDecisionCard from './QuantDecisionCard';
+import { UIDecisionCard } from './UIDecisionCard';
 
 import * as htmlToImage from 'html-to-image';
 import type { StockInput, StockAnalysisResult, KeyStatsData, AgentStoryResult } from '@/lib/types';
@@ -279,13 +282,17 @@ export default function Calculator({ selectedStock }: CalculatorProps) {
       });
 
       const data = await response.json();
-      if (!data.success) throw new Error(data.error);
+      if (!data.success) {
+        console.warn('[Story Analysis] Notice:', data.error || data.message);
+        setStoryStatus('error');
+        return;
+      }
 
       // Start polling for status
       resumeStoryPolling(emiten);
 
-    } catch (err) {
-      console.error('Failed to start analysis:', err);
+    } catch (err: any) {
+      console.warn('[Story Analysis] Notice:', err.message || err);
       setStoryStatus('error');
     } finally {
       window.dispatchEvent(new CustomEvent('stockbit-fetch-end'));
@@ -404,21 +411,23 @@ export default function Calculator({ selectedStock }: CalculatorProps) {
             <div style={{
               marginBottom: '1.5rem',
               padding: '1rem',
-              background: 'rgba(255, 193, 7, 0.1)',
-              border: '1px solid rgba(255, 193, 7, 0.3)',
+              background: 'rgba(59, 130, 246, 0.1)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
               borderRadius: '12px',
-              color: '#ffc107',
+              color: '#93c5fd',
               display: 'flex',
               alignItems: 'center',
               gap: '0.75rem',
               fontSize: '0.9rem'
             }}>
-              <span style={{ fontSize: '1.2rem' }}>⚠️</span>
+              <span style={{ fontSize: '1.3rem' }}>ℹ️</span>
               <div>
-                Data broker live tidak tersedia. Menampilkan data history terakhir dari tanggal
-                <strong style={{ marginLeft: '4px', color: '#ffca2c' }}>
+                <strong>Bursa BEI Sedang Berjalan (Broker Code Masking):</strong> Sesuai regulasi BEI, kode broker dan akumulasi harian ditutup selama jam perdagangan aktif (09:00–16:00 WIB) dan baru dirilis bursa setelah pasar tutup (~16:15 WIB). 
+                Sistem otomatis memadukan data akumulasi broker sesi penutupan terakhir (
+                <strong style={{ color: '#60a5fa' }}>
                   {new Date(result.historyDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
                 </strong>
+                ) dengan harga orderbook live real-time (<strong>Rp {result.marketData.harga.toLocaleString()}</strong>).
               </div>
             </div>
           )}
@@ -444,7 +453,9 @@ export default function Calculator({ selectedStock }: CalculatorProps) {
             {result.brokerSummary && (
               <BrokerSummaryCard
                 emiten={result.input.emiten}
-                dateRange={`${result.input.fromDate} — ${result.input.toDate}`}
+                dateRange={result.input.fromDate === result.input.toDate 
+                  ? (result.input.fromDate === new Date().toISOString().split('T')[0] ? `${result.input.fromDate} (Realtime Live)` : result.input.fromDate)
+                  : `${result.input.fromDate} — ${result.input.toDate}`}
                 brokerSummary={result.brokerSummary}
                 sector={result.sector}
               />
@@ -456,6 +467,38 @@ export default function Calculator({ selectedStock }: CalculatorProps) {
                 emiten={result.input.emiten}
                 keyStats={keyStats}
               />
+            )}
+
+            {/* Canonical PRD v2.0 Decision Card (5 Blocks + Provenance Drawer) */}
+            {result.decisionGateV2 && (
+              <div style={{ gridColumn: '1 / -1', width: '100%' }}>
+                <UIDecisionCard decision={result.decisionGateV2} />
+              </div>
+            )}
+
+            {/* SmartMoney AI Quant Decision & Accumulation Proxy Card - Full Width */}
+            {(result.accumulationProxy || result.entryRiskPlan || result.quantDecision) && (
+              <div style={{ gridColumn: '1 / -1', width: '100%' }}>
+                <QuantDecisionCard
+                  emiten={result.input.emiten}
+                  currentPrice={result.marketData.harga}
+                  accumulationProxy={result.accumulationProxy}
+                  entryRiskPlan={result.entryRiskPlan}
+                  quantDecision={result.quantDecision}
+                />
+              </div>
+            )}
+
+            {/* Baseline Benchmark Card - Full Width */}
+            {result.targetLadder && (
+              <div style={{ gridColumn: '1 / -1', width: '100%' }}>
+                <BaselineBenchmarkCard
+                  emiten={result.input.emiten}
+                  currentPrice={result.marketData.harga}
+                  targetLadder={result.targetLadder}
+                  calibratedProbability={result.calibratedProbability}
+                />
+              </div>
             )}
 
             {/* Emiten History Card - Full Width */}

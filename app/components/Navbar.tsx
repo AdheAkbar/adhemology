@@ -32,8 +32,8 @@ const Navbar = () => {
             </svg>
           </div>
           <div className="navbar-content">
-            <h1 className="navbar-title">Adimology Calculator</h1>
-            <p className="navbar-subtitle">Analyze stock targets based on broker summary</p>
+            <h1 className="navbar-title">SmartMoney AI</h1>
+            <p className="navbar-subtitle">Institutional Quant Terminal for IDX Day Trading</p>
           </div>
         </div>
 
@@ -41,18 +41,91 @@ const Navbar = () => {
         <div className="nav-desktop-actions">
           <div className="nav-links">
             <Link 
+              href="/scanner" 
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/scanner' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/scanner' ? 600 : 400,
+                fontSize: '0.85rem',
+                borderBottom: pathname === '/scanner' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                paddingBottom: '2px',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+            >
+              <span>⚡ Scanner</span>
+            </Link>
+            <Link 
               href="/" 
               style={{
                 textDecoration: 'none',
                 color: pathname === '/' ? 'var(--text-primary)' : 'var(--text-secondary)',
                 fontWeight: pathname === '/' ? 600 : 400,
-                fontSize: '0.9rem',
+                fontSize: '0.85rem',
                 borderBottom: pathname === '/' ? '2px solid var(--accent-primary)' : '2px solid transparent',
                 paddingBottom: '2px',
                 transition: 'all 0.2s'
               }}
             >
-              Calculator
+              Stock Detail
+            </Link>
+            <Link 
+              href="/journal" 
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/journal' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/journal' ? 600 : 400,
+                fontSize: '0.85rem',
+                borderBottom: pathname === '/journal' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                paddingBottom: '2px',
+                transition: 'all 0.2s'
+              }}
+            >
+              Journal
+            </Link>
+            <Link 
+              href="/model-health" 
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/model-health' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/model-health' ? 600 : 400,
+                fontSize: '0.85rem',
+                borderBottom: pathname === '/model-health' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                paddingBottom: '2px',
+                transition: 'all 0.2s'
+              }}
+            >
+              Model Health
+            </Link>
+            <Link 
+              href="/data-health" 
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/data-health' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/data-health' ? 600 : 400,
+                fontSize: '0.85rem',
+                borderBottom: pathname === '/data-health' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                paddingBottom: '2px',
+                transition: 'all 0.2s'
+              }}
+            >
+              Data Health
+            </Link>
+            <Link 
+              href="/backtest" 
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/backtest' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/backtest' ? 600 : 400,
+                fontSize: '0.85rem',
+                borderBottom: pathname === '/backtest' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                paddingBottom: '2px',
+                transition: 'all 0.2s'
+              }}
+            >
+              Backtest Lab
             </Link>
             <Link 
               href="/history" 
@@ -60,7 +133,7 @@ const Navbar = () => {
                 textDecoration: 'none',
                 color: pathname === '/history' ? 'var(--text-primary)' : 'var(--text-secondary)',
                 fontWeight: pathname === '/history' ? 600 : 400,
-                fontSize: '0.9rem',
+                fontSize: '0.85rem',
                 borderBottom: pathname === '/history' ? '2px solid var(--accent-primary)' : '2px solid transparent',
                 paddingBottom: '2px',
                 transition: 'all 0.2s'
@@ -74,7 +147,7 @@ const Navbar = () => {
                 textDecoration: 'none',
                 color: pathname === '/summary' ? 'var(--text-primary)' : 'var(--text-secondary)',
                 fontWeight: pathname === '/summary' ? 600 : 400,
-                fontSize: '0.9rem',
+                fontSize: '0.85rem',
                 borderBottom: pathname === '/summary' ? '2px solid var(--accent-primary)' : '2px solid transparent',
                 paddingBottom: '2px',
                 transition: 'all 0.2s'
@@ -82,22 +155,6 @@ const Navbar = () => {
             >
               Summary
             </Link>
-            <a 
-              href="https://github.com/bhaktiutama/adimology" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                color: 'var(--text-secondary)',
-                transition: 'color 0.2s',
-                paddingBottom: '2px',
-              }}
-              className="github-link"
-              title="View on GitHub"
-            >
-              <Github size={20} />
-            </a>
           </div>
           <div className="nav-status-group">
             <StockbitFetchingIndicator />
@@ -137,6 +194,20 @@ const Navbar = () => {
         <div className={`nav-mobile-menu ${isMenuOpen ? 'open' : ''}`}>
           <div className="nav-links">
             <Link 
+              href="/scanner" 
+              onClick={() => setIsMenuOpen(false)}
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/scanner' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/scanner' ? 600 : 400,
+                fontSize: '1rem',
+                padding: '0.5rem 0',
+                transition: 'all 0.2s'
+              }}
+            >
+              ⚡ Live Scanner
+            </Link>
+            <Link 
               href="/" 
               onClick={() => setIsMenuOpen(false)}
               style={{
@@ -148,7 +219,63 @@ const Navbar = () => {
                 transition: 'all 0.2s'
               }}
             >
-              Calculator
+              Stock Detail
+            </Link>
+            <Link 
+              href="/journal" 
+              onClick={() => setIsMenuOpen(false)}
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/journal' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/journal' ? 600 : 400,
+                fontSize: '1rem',
+                padding: '0.5rem 0',
+                transition: 'all 0.2s'
+              }}
+            >
+              Signal Journal
+            </Link>
+            <Link 
+              href="/model-health" 
+              onClick={() => setIsMenuOpen(false)}
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/model-health' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/model-health' ? 600 : 400,
+                fontSize: '1rem',
+                padding: '0.5rem 0',
+                transition: 'all 0.2s'
+              }}
+            >
+              Model Health
+            </Link>
+            <Link 
+              href="/data-health" 
+              onClick={() => setIsMenuOpen(false)}
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/data-health' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/data-health' ? 600 : 400,
+                fontSize: '1rem',
+                padding: '0.5rem 0',
+                transition: 'all 0.2s'
+              }}
+            >
+              Data Health
+            </Link>
+            <Link 
+              href="/backtest" 
+              onClick={() => setIsMenuOpen(false)}
+              style={{
+                textDecoration: 'none',
+                color: pathname === '/backtest' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                fontWeight: pathname === '/backtest' ? 600 : 400,
+                fontSize: '1rem',
+                padding: '0.5rem 0',
+                transition: 'all 0.2s'
+              }}
+            >
+              Backtest Lab
             </Link>
             <Link 
               href="/history" 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { getEmitenFlag, setEmitenFlag } from '@/lib/supabase';
 
 export async function POST(request: NextRequest) {
     try {
@@ -19,15 +19,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const { data, error } = await supabase
-            .from('emiten_flags')
-            .upsert({ emiten: emiten.toUpperCase(), flag, updated_at: new Date().toISOString() })
-            .select()
-            .single();
-
-        if (error) {
-            throw error;
-        }
+        const data = await setEmitenFlag(emiten, flag as 'OK' | 'NG' | 'Neutral');
 
         return NextResponse.json({ success: true, data });
     } catch (error) {
@@ -41,6 +33,7 @@ export async function POST(request: NextRequest) {
         );
     }
 }
+
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
@@ -53,17 +46,9 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        const { data, error } = await supabase
-            .from('emiten_flags')
-            .select('flag')
-            .eq('emiten', emiten.toUpperCase())
-            .single();
+        const flag = await getEmitenFlag(emiten);
 
-        if (error && error.code !== 'PGRST116') { // PGRST116 is single record not found
-            throw error;
-        }
-
-        return NextResponse.json({ success: true, flag: data?.flag || null });
+        return NextResponse.json({ success: true, flag });
     } catch (error) {
         console.error('Flag API Error:', error);
         return NextResponse.json(

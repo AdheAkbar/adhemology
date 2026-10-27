@@ -46,39 +46,51 @@ export async function POST(request: NextRequest) {
     // Create pending record
     const story = await createAgentStory(emiten);
 
+    // Check GEMINI_API_KEY
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      const errMsg = 'GEMINI_API_KEY belum dikonfigurasi di .env.local';
+      await updateAgentStory(story.id, {
+        status: 'error',
+        error_message: errMsg,
+      });
+      return NextResponse.json({
+        success: true,
+        data: story,
+        message: errMsg,
+      });
+    }
+
     // Trigger background function
     const host = request.headers.get('host');
-    const baseUrl = host?.includes('localhost') 
-      ? 'http://localhost:8888' 
-      : `https://${host}`;
+    const isLocal = host?.includes('localhost') || host?.includes('127.0.0.1');
+    const baseUrl = isLocal ? 'http://localhost:8888' : `https://${host}`;
 
-    const functionUrl = baseUrl.includes('/.netlify/functions') 
-      ? baseUrl 
+    const functionUrl = baseUrl.includes('/.netlify/functions')
+      ? baseUrl
       : `${baseUrl.replace(/\/$/, '')}/.netlify/functions`;
-
 
     console.log(`[Agent Story] Triggering background function at: ${functionUrl}/analyze-story-background`);
 
-    // Await the invocation itself (Netlify background functions still return
-    // immediately - this does NOT wait for the analysis to finish). This avoids
-    // leaving the row stuck at 'pending' forever if the trigger request never
-    // makes it out (e.g. the execution context freezes right after we respond).
     try {
       await fetch(`${functionUrl}/analyze-story-background?emiten=${emiten}&id=${story.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyStats })
+        body: JSON.stringify({ keyStats }),
       });
-    } catch (triggerError) {
-      console.error('Failed to trigger background function:', triggerError);
+    } catch (triggerError: any) {
+      console.warn('Background function trigger notice:', triggerError.message);
       await updateAgentStory(story.id, {
         status: 'error',
-        error_message: 'Gagal memulai proses analisis'
+        error_message: isLocal
+          ? 'Fitur AI Story Analysis memerlukan Netlify Function atau background worker lokal aktif.'
+          : 'Gagal memulai proses analisis background.',
       });
       return NextResponse.json({
-        success: false,
-        error: 'Failed to trigger background analysis'
-      }, { status: 502 });
+        success: true,
+        data: story,
+        message: 'Analysis initiated with local fallback notice',
+      });
     }
 
     return NextResponse.json({

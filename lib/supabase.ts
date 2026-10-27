@@ -1,9 +1,43 @@
 import { createClient } from '@supabase/supabase-js';
+import {
+  saveStockQueryLocal,
+  getWatchlistAnalysisHistoryLocal,
+  getLatestStockQueryLocal,
+  getSpecificStockQueryLocal,
+  getStockPriceByDateLocal,
+  updatePreviousDayRealPriceLocal,
+  getEmitenSummaryStatsLocal,
+  hasWatchlistCacheLocal,
+  getCachedWatchlistGroupsLocal,
+  saveCachedWatchlistGroupsLocal,
+  getCachedWatchlistItemsLocal,
+  saveCachedWatchlistItemsLocal,
+  deleteCachedWatchlistItemLocal,
+  getEmitenFlagLocal,
+  setEmitenFlagLocal,
+  getEmitenFlagsLocal,
+  getProfileSettingLocal,
+  setProfileSettingLocal,
+  getSessionValueLocal,
+  upsertSessionLocal,
+  inMemoryStories,
+  inMemoryJobLogs,
+} from './local-store';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+export function isSupabaseConfigured(): boolean {
+  return Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      !process.env.NEXT_PUBLIC_SUPABASE_URL.includes('placeholder.supabase.co')
+  );
+}
+
+// Re-export flag helpers for app routes
+export { getEmitenFlagLocal as getEmitenFlag, setEmitenFlagLocal as setEmitenFlag, getEmitenFlagsLocal as getEmitenFlags };
 
 /**
  * Save stock query to database
@@ -29,31 +63,48 @@ export async function saveStockQuery(data: {
   target_realistis?: number;
   target_max?: number;
 }) {
-  const { data: result, error } = await supabase
-    .from('stock_queries')
-    .upsert([data], { onConflict: 'from_date,emiten' })
-    .select();
-
-  if (error) {
-    console.error('Error saving to Supabase:', error);
-    throw error;
+  if (!isSupabaseConfigured()) {
+    return saveStockQueryLocal(data);
   }
 
-  return result;
+  try {
+    const { data: result, error } = await supabase
+      .from('stock_queries')
+      .upsert([data], { onConflict: 'from_date,emiten' })
+      .select();
+
+    if (error) throw error;
+    return result;
+  } catch (err) {
+    console.warn('[Supabase Fallback] saveStockQuery fallback to local store:', err);
+    return saveStockQueryLocal(data);
+  }
 }
 
 /**
  * Get session value by key
  */
 export async function getSessionValue(key: string): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('session')
-    .select('value')
-    .eq('key', key)
-    .single();
+  if (key === 'stockbit_token' && process.env.STOCKBIT_JWT_TOKEN) {
+    return process.env.STOCKBIT_JWT_TOKEN.replace(/^Bearer\s+/i, '').trim();
+  }
 
-  if (error || !data) return null;
-  return data.value;
+  if (!isSupabaseConfigured()) {
+    return getSessionValueLocal(key);
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('session')
+      .select('value')
+      .eq('key', key)
+      .single();
+
+    if (error || !data) return getSessionValueLocal(key);
+    return data.value ? data.value.replace(/^Bearer\s+/i, '').trim() : null;
+  } catch {
+    return getSessionValueLocal(key);
+  }
 }
 
 /**
@@ -82,6 +133,41 @@ export async function getTokenStatus(): Promise<TokenStatus> {
     .single();
 
   if (error || !data) {
+    const rawEnvToken = process.env.STOCKBIT_JWT_TOKEN;
+    if (rawEnvToken) {
+      const envToken = rawEnvToken.replace(/^Bearer\s+/i, '').trim();
+      let expiresAt: Date | null = null;
+      try {
+        const payloadBase64 = envToken.split('.')[1];
+        if (payloadBase64) {
+          const jsonStr = Buffer.from(payloadBase64, 'base64').toString('utf-8');
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.exp) {
+            expiresAt = new Date(parsed.exp * 1000);
+          }
+        }
+      } catch {}
+
+      const now = new Date();
+      const isExpired = expiresAt ? expiresAt < now : false;
+      const hoursUntilExpiry = expiresAt 
+        ? (expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60) 
+        : undefined;
+      const isExpiringSoon = hoursUntilExpiry !== undefined && hoursUntilExpiry <= 1 && hoursUntilExpiry > 0;
+
+      return {
+        exists: true,
+        isValid: !isExpired,
+        token: envToken,
+        expiresAt: expiresAt ? expiresAt.toISOString() : undefined,
+        lastUsedAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        isExpiringSoon,
+        isExpired,
+        hoursUntilExpiry,
+      };
+    }
+
     return {
       exists: false,
       isValid: false,
@@ -119,29 +205,39 @@ export async function upsertSession(
   value: string, 
   expiresAt?: Date
 ) {
-  const { data, error } = await supabase
-    .from('session')
-    .upsert(
-      { 
-        key, 
-        value, 
-        updated_at: new Date().toISOString(),
-        expires_at: expiresAt?.toISOString() || null,
-        is_valid: true,
-        last_used_at: new Date().toISOString(),
-      },
-      { onConflict: 'key' }
-    )
-    .select();
+  if (!isSupabaseConfigured()) {
+    return upsertSessionLocal(key, value, expiresAt);
+  }
 
-  if (error) throw error;
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('session')
+      .upsert(
+        { 
+          key, 
+          value, 
+          updated_at: new Date().toISOString(),
+          expires_at: expiresAt?.toISOString() || null,
+          is_valid: true,
+          last_used_at: new Date().toISOString(),
+        },
+        { onConflict: 'key' }
+      )
+      .select();
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.warn('[Supabase Fallback] upsertSession fallback to local store:', err);
+    return upsertSessionLocal(key, value, expiresAt);
+  }
 }
 
 /**
  * Update token last used timestamp (call after successful API request)
  */
 export async function updateTokenLastUsed() {
+  if (!isSupabaseConfigured()) return;
   const { error } = await supabase
     .from('session')
     .update({ last_used_at: new Date().toISOString() })
@@ -156,6 +252,7 @@ export async function updateTokenLastUsed() {
  * Mark token as invalid (call when receiving 401 from Stockbit API)
  */
 export async function invalidateToken() {
+  if (!isSupabaseConfigured()) return;
   const { error } = await supabase
     .from('session')
     .update({ is_valid: false })
@@ -209,17 +306,22 @@ export async function saveWatchlistAnalysis(data: {
   status?: string;
   error_message?: string;
 }) {
-  const { data: result, error } = await supabase
-    .from('stock_queries')
-    .upsert([data], { onConflict: 'from_date,emiten' })
-    .select();
-
-  if (error) {
-    console.error('Error saving watchlist analysis:', error);
-    throw error;
+  if (!isSupabaseConfigured()) {
+    return saveStockQueryLocal(data);
   }
 
-  return result;
+  try {
+    const { data: result, error } = await supabase
+      .from('stock_queries')
+      .upsert([data], { onConflict: 'from_date,emiten' })
+      .select();
+
+    if (error) throw error;
+    return result;
+  } catch (err) {
+    console.warn('[Supabase Fallback] saveWatchlistAnalysis fallback to local store:', err);
+    return saveStockQueryLocal(data);
+  }
 }
 
 /**
@@ -236,173 +338,225 @@ export async function getWatchlistAnalysisHistory(filters?: {
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
 }) {
-  let query = supabase
-    .from('stock_queries')
-    .select('*', { count: 'exact' });
-
-  // Handle sorting
-  const sortBy = filters?.sortBy || 'from_date';
-  const sortOrder = filters?.sortOrder || 'desc';
-
-  if (sortBy === 'combined') {
-    // Sort by date then emiten
-    query = query
-      .order('from_date', { ascending: sortOrder === 'asc' })
-      .order('emiten', { ascending: sortOrder === 'asc' });
-  } else if (sortBy === 'emiten') {
-    // When sorting by emiten, secondary sort by date ascending
-    query = query
-      .order('emiten', { ascending: sortOrder === 'asc' })
-      .order('from_date', { ascending: true });
-  } else {
-    query = query.order(sortBy, { ascending: sortOrder === 'asc' });
+  if (!isSupabaseConfigured()) {
+    return getWatchlistAnalysisHistoryLocal(filters);
   }
 
-  if (filters?.emiten) {
-    const emitenList = filters.emiten.split(/\s+/).filter(Boolean);
-    if (emitenList.length > 0) { // Changed to always use .in() if emitens are present
-      query = query.in('emiten', emitenList);
+  try {
+    let query = supabase
+      .from('stock_queries')
+      .select('*', { count: 'exact' });
+
+    // Handle sorting
+    const sortBy = filters?.sortBy || 'from_date';
+    const sortOrder = filters?.sortOrder || 'desc';
+
+    if (sortBy === 'combined') {
+      // Sort by date then emiten
+      query = query
+        .order('from_date', { ascending: sortOrder === 'asc' })
+        .order('emiten', { ascending: sortOrder === 'asc' });
+    } else if (sortBy === 'emiten') {
+      // When sorting by emiten, secondary sort by date ascending
+      query = query
+        .order('emiten', { ascending: sortOrder === 'asc' })
+        .order('from_date', { ascending: true });
+    } else {
+      query = query.order(sortBy, { ascending: sortOrder === 'asc' });
     }
-  }
-  if (filters?.sector) {
-    query = query.eq('sector', filters.sector);
-  }
-  if (filters?.fromDate) {
-    query = query.gte('from_date', filters.fromDate);
-  }
-  if (filters?.toDate) {
-    query = query.lte('from_date', filters.toDate);
-  }
-  if (filters?.status) {
-    query = query.eq('status', filters.status);
-  }
-  if (filters?.limit) {
-    query = query.limit(filters.limit);
-  }
-  if (filters?.offset) {
-    query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
-  }
 
-  const { data, error, count } = await query;
+    if (filters?.emiten) {
+      const emitenList = filters.emiten.split(/\s+/).filter(Boolean);
+      if (emitenList.length > 0) { // Changed to always use .in() if emitens are present
+        query = query.in('emiten', emitenList);
+      }
+    }
+    if (filters?.sector) {
+      query = query.eq('sector', filters.sector);
+    }
+    if (filters?.fromDate) {
+      query = query.gte('from_date', filters.fromDate);
+    }
+    if (filters?.toDate) {
+      query = query.lte('from_date', filters.toDate);
+    }
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+    if (filters?.limit) {
+      query = query.limit(filters.limit);
+    }
+    if (filters?.offset) {
+      query = query.range(filters.offset, filters.offset + (filters.limit || 50) - 1);
+    }
 
-  if (error) {
-    console.error('Error fetching watchlist analysis:', error);
-    throw error;
+    const { data, error, count } = await query;
+    if (error) throw error;
+    return { data, count };
+  } catch (err) {
+    console.warn('[Supabase Fallback] getWatchlistAnalysisHistory fallback to local store:', err);
+    return getWatchlistAnalysisHistoryLocal(filters);
   }
-
-  return { data, count };
 }
 
 /**
  * Get latest stock query for a specific emiten
  */
 export async function getLatestStockQuery(emiten: string) {
-  const { data, error } = await supabase
-    .from('stock_queries')
-    .select('*')
-    .eq('emiten', emiten)
-    .eq('status', 'success')
-    .order('from_date', { ascending: false })
-    .limit(1)
-    .single();
+  if (!isSupabaseConfigured()) {
+    return getLatestStockQueryLocal(emiten);
+  }
 
-  if (error) return null;
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('stock_queries')
+      .select('*')
+      .eq('emiten', emiten.toUpperCase())
+      .eq('status', 'success')
+      .order('from_date', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) return getLatestStockQueryLocal(emiten);
+    return data;
+  } catch {
+    return getLatestStockQueryLocal(emiten);
+  }
 }
 
 /**
  * Get specific stock query for a given emiten and date range
  */
 export async function getSpecificStockQuery(emiten: string, fromDate: string, toDate: string) {
-  const { data, error } = await supabase
-    .from('stock_queries')
-    .select('*')
-    .eq('emiten', emiten.toUpperCase())
-    .eq('from_date', fromDate)
-    .eq('to_date', toDate)
-    .eq('status', 'success')
-    .limit(1)
-    .single();
+  if (!isSupabaseConfigured()) {
+    return getSpecificStockQueryLocal(emiten, fromDate, toDate);
+  }
 
-  if (error) return null;
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('stock_queries')
+      .select('*')
+      .eq('emiten', emiten.toUpperCase())
+      .eq('from_date', fromDate)
+      .eq('to_date', toDate)
+      .eq('status', 'success')
+      .limit(1)
+      .single();
+
+    if (error) return getSpecificStockQueryLocal(emiten, fromDate, toDate);
+    return data;
+  } catch {
+    return getSpecificStockQueryLocal(emiten, fromDate, toDate);
+  }
 }
 
 /**
  * Get stock price for a specific emiten on a specific date (matching from_date)
  */
 export async function getStockPriceByDate(emiten: string, date: string) {
-  const { data, error } = await supabase
-    .from('stock_queries')
-    .select('harga, ara, arb, total_bid, total_offer, fraksi')
-    .eq('emiten', emiten.toUpperCase())
-    .eq('from_date', date)
-    .eq('status', 'success')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
+  if (!isSupabaseConfigured()) {
+    return getStockPriceByDateLocal(emiten, date);
+  }
 
-  if (error) return null;
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('stock_queries')
+      .select('harga, ara, arb, total_bid, total_offer, fraksi')
+      .eq('emiten', emiten.toUpperCase())
+      .eq('from_date', date)
+      .eq('status', 'success')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error) return getStockPriceByDateLocal(emiten, date);
+    return data;
+  } catch {
+    return getStockPriceByDateLocal(emiten, date);
+  }
 }
 
 /**
  * Update the most recent previous day's real price for an emiten
  */
 export async function updatePreviousDayRealPrice(emiten: string, currentDate: string, price: number, maxPrice?: number) {
-  // 1. Find the latest successful record before currentDate
-  const { data: record, error: findError } = await supabase
-    .from('stock_queries')
-    .select('id, from_date')
-    .eq('emiten', emiten)
-    .eq('status', 'success')
-    .lt('from_date', currentDate)
-    .order('from_date', { ascending: false })
-    .limit(1)
-    .single();
+  if (!isSupabaseConfigured()) {
+    return updatePreviousDayRealPriceLocal(emiten, currentDate, price, maxPrice);
+  }
 
-  if (findError || !record) {
-    if (findError && findError.code !== 'PGRST116') { // PGRST116 is "no rows returned"
-      console.error(`Error finding previous record for ${emiten} before ${currentDate}:`, findError);
+  try {
+    // 1. Find the latest successful record before currentDate
+    const { data: record, error: findError } = await supabase
+      .from('stock_queries')
+      .select('id, from_date')
+      .eq('emiten', emiten)
+      .eq('status', 'success')
+      .lt('from_date', currentDate)
+      .order('from_date', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (findError || !record) {
+      return updatePreviousDayRealPriceLocal(emiten, currentDate, price, maxPrice);
     }
-    return null;
+
+    // 2. Update that record with the new price
+    const updateData: { real_harga: number; max_harga?: number } = { real_harga: price };
+    if (maxPrice !== undefined) {
+      updateData.max_harga = maxPrice;
+    }
+
+    const { data, error: updateError } = await supabase
+      .from('stock_queries')
+      .update(updateData)
+      .eq('id', record.id)
+      .select();
+
+    if (updateError) {
+      return updatePreviousDayRealPriceLocal(emiten, currentDate, price, maxPrice);
+    }
+
+    return data;
+  } catch {
+    return updatePreviousDayRealPriceLocal(emiten, currentDate, price, maxPrice);
   }
-
-  // 2. Update that record with the new price
-  const updateData: { real_harga: number; max_harga?: number } = { real_harga: price };
-  if (maxPrice !== undefined) {
-    updateData.max_harga = maxPrice;
-  }
-
-  const { data, error: updateError } = await supabase
-    .from('stock_queries')
-    .update(updateData)
-    .eq('id', record.id)
-    .select();
-
-  if (updateError) {
-    console.error(`Error updating real_harga for ${emiten} on ${record.from_date}:`, updateError);
-  }
-
-  return data;
 }
 
 /**
  * Create a new agent story record with pending status
  */
 export async function createAgentStory(emiten: string) {
-  const { data, error } = await supabase
-    .from('agent_stories')
-    .insert({ emiten, status: 'pending' })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating agent story:', error);
-    throw error;
+  if (!isSupabaseConfigured()) {
+    const item = {
+      id: Date.now(),
+      emiten: emiten.toUpperCase(),
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    inMemoryStories.unshift(item);
+    return item;
   }
 
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('agent_stories')
+      .insert({ emiten, status: 'pending' })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.warn('[Supabase Fallback] createAgentStory fallback to memory:', err);
+    const item = {
+      id: Date.now(),
+      emiten: emiten.toUpperCase(),
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    };
+    inMemoryStories.unshift(item);
+    return item;
+  }
 }
 
 /**
@@ -421,81 +575,136 @@ export async function updateAgentStory(id: number, data: {
   model?: string;
   thinking_level?: string;
 }) {
-
-  const { data: result, error } = await supabase
-    .from('agent_stories')
-    .update(data)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error updating agent story:', error);
-    throw error;
+  if (!isSupabaseConfigured()) {
+    const found = inMemoryStories.find((s) => s.id === id);
+    if (found) {
+      Object.assign(found, data, { updated_at: new Date().toISOString() });
+      return found;
+    }
+    const item = { id, ...data, updated_at: new Date().toISOString() };
+    inMemoryStories.unshift(item);
+    return item;
   }
 
-  return result;
+  try {
+    const { data: result, error } = await supabase
+      .from('agent_stories')
+      .update(data)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return result;
+  } catch (err) {
+    console.warn('[Supabase Fallback] updateAgentStory fallback to memory:', err);
+    const found = inMemoryStories.find((s) => s.id === id);
+    if (found) {
+      Object.assign(found, data, { updated_at: new Date().toISOString() });
+      return found;
+    }
+    const item = { id, ...data, updated_at: new Date().toISOString() };
+    inMemoryStories.unshift(item);
+    return item;
+  }
 }
 
 /**
  * Get latest agent story for an emiten
  */
 export async function getAgentStoryByEmiten(emiten: string) {
-  const { data, error } = await supabase
-    .from('agent_stories')
-    .select('*')
-    .eq('emiten', emiten.toUpperCase())
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    console.error('Error fetching agent story:', error);
+  if (!isSupabaseConfigured()) {
+    const found = inMemoryStories.find((s) => s.emiten === emiten.toUpperCase());
+    return found || null;
   }
 
-  return data || null;
+  try {
+    const { data, error } = await supabase
+      .from('agent_stories')
+      .select('*')
+      .eq('emiten', emiten.toUpperCase())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.warn('[Supabase] Error fetching agent story, checking memory:', error);
+      return inMemoryStories.find((s) => s.emiten === emiten.toUpperCase()) || null;
+    }
+
+    return data || inMemoryStories.find((s) => s.emiten === emiten.toUpperCase()) || null;
+  } catch {
+    return inMemoryStories.find((s) => s.emiten === emiten.toUpperCase()) || null;
+  }
 }
 
 /**
  * Get all agent stories for an emiten
  */
 export async function getAgentStoriesByEmiten(emiten: string, limit: number = 20) {
-  const { data, error } = await supabase
-    .from('agent_stories')
-    .select('*')
-    .eq('emiten', emiten.toUpperCase())
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.error('Error fetching agent stories:', error);
-    throw error;
+  if (!isSupabaseConfigured()) {
+    return inMemoryStories.filter((s) => s.emiten === emiten.toUpperCase()).slice(0, limit);
   }
 
-  return data || [];
+  try {
+    const { data, error } = await supabase
+      .from('agent_stories')
+      .select('*')
+      .eq('emiten', emiten.toUpperCase())
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data || [];
+  } catch {
+    return inMemoryStories.filter((s) => s.emiten === emiten.toUpperCase()).slice(0, limit);
+  }
 }
 
 /**
  * Create a new background job log entry
  */
 export async function createBackgroundJobLog(jobName: string, totalItems: number = 0) {
-  const { data, error } = await supabase
-    .from('background_job_logs')
-    .insert({
+  if (!isSupabaseConfigured()) {
+    const item = {
+      id: Date.now(),
       job_name: jobName,
       status: 'running',
       total_items: totalItems,
+      started_at: new Date().toISOString(),
       log_entries: [],
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error creating background job log:', error);
-    throw error;
+    };
+    inMemoryJobLogs.unshift(item);
+    return item;
   }
 
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('background_job_logs')
+      .insert({
+        job_name: jobName,
+        status: 'running',
+        total_items: totalItems,
+        log_entries: [],
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.warn('[Supabase Fallback] createBackgroundJobLog fallback to memory:', err);
+    const item = {
+      id: Date.now(),
+      job_name: jobName,
+      status: 'running',
+      total_items: totalItems,
+      started_at: new Date().toISOString(),
+      log_entries: [],
+    };
+    inMemoryJobLogs.unshift(item);
+    return item;
+  }
 }
 
 /**
@@ -515,29 +724,37 @@ export async function appendBackgroundJobLogEntry(
     ...entry,
   };
 
-  // Use raw SQL to append to JSONB array for atomic operation
-  const { error } = await supabase.rpc('append_job_log_entry', {
-    p_job_id: jobId,
-    p_entry: logEntry,
-  });
+  const found = inMemoryJobLogs.find((j) => j.id === jobId);
+  if (found) {
+    found.log_entries = found.log_entries || [];
+    found.log_entries.push(logEntry);
+  }
 
-  // If RPC doesn't exist, fallback to fetch-and-update
-  if (error && error.code === 'PGRST202') {
-    const { data: current } = await supabase
-      .from('background_job_logs')
-      .select('log_entries')
-      .eq('id', jobId)
-      .single();
+  if (!isSupabaseConfigured()) return;
 
-    const entries = current?.log_entries || [];
-    entries.push(logEntry);
+  try {
+    const { error } = await supabase.rpc('append_job_log_entry', {
+      p_job_id: jobId,
+      p_entry: logEntry,
+    });
 
-    await supabase
-      .from('background_job_logs')
-      .update({ log_entries: entries })
-      .eq('id', jobId);
-  } else if (error) {
-    console.error('Error appending job log entry:', error);
+    if (error && error.code === 'PGRST202') {
+      const { data: current } = await supabase
+        .from('background_job_logs')
+        .select('log_entries')
+        .eq('id', jobId)
+        .single();
+
+      const entries = current?.log_entries || [];
+      entries.push(logEntry);
+
+      await supabase
+        .from('background_job_logs')
+        .update({ log_entries: entries })
+        .eq('id', jobId);
+    }
+  } catch {
+    // Graceful
   }
 }
 
@@ -554,22 +771,32 @@ export async function updateBackgroundJobLog(
     metadata?: Record<string, unknown>;
   }
 ) {
-  const { data: result, error } = await supabase
-    .from('background_job_logs')
-    .update({
-      ...data,
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', jobId)
-    .select()
-    .single();
-
-  if (error) {
-    console.error('Error updating background job log:', error);
-    throw error;
+  const found = inMemoryJobLogs.find((j) => j.id === jobId);
+  if (found) {
+    Object.assign(found, data, { completed_at: new Date().toISOString() });
   }
 
-  return result;
+  if (!isSupabaseConfigured()) {
+    return found || { id: jobId, ...data };
+  }
+
+  try {
+    const { data: result, error } = await supabase
+      .from('background_job_logs')
+      .update({
+        ...data,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', jobId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return result;
+  } catch (err) {
+    console.warn('[Supabase Fallback] updateBackgroundJobLog fallback to memory:', err);
+    return found || { id: jobId, ...data };
+  }
 }
 
 /**
@@ -581,165 +808,209 @@ export async function getBackgroundJobLogs(filters?: {
   limit?: number;
   offset?: number;
 }) {
-  let query = supabase
-    .from('background_job_logs')
-    .select('*', { count: 'exact' })
-    .order('started_at', { ascending: false });
-
-  if (filters?.jobName) {
-    query = query.eq('job_name', filters.jobName);
-  }
-  if (filters?.status) {
-    query = query.eq('status', filters.status);
-  }
-  if (filters?.limit) {
-    query = query.limit(filters.limit);
-  }
-  if (filters?.offset) {
-    query = query.range(filters.offset, filters.offset + (filters.limit || 20) - 1);
+  if (!isSupabaseConfigured()) {
+    let list = [...inMemoryJobLogs];
+    if (filters?.jobName) list = list.filter((j) => j.job_name === filters.jobName);
+    if (filters?.status) list = list.filter((j) => j.status === filters.status);
+    const total = list.length;
+    const offset = filters?.offset || 0;
+    const limit = filters?.limit || 20;
+    return { data: list.slice(offset, offset + limit), count: total };
   }
 
-  const { data, error, count } = await query;
+  try {
+    let query = supabase
+      .from('background_job_logs')
+      .select('*', { count: 'exact' })
+      .order('started_at', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching background job logs:', error);
-    throw error;
+    if (filters?.jobName) {
+      query = query.eq('job_name', filters.jobName);
+    }
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+    if (filters?.limit) {
+      query = query.limit(filters.limit);
+    }
+    if (filters?.offset) {
+      query = query.range(filters.offset, filters.offset + (filters.limit || 20) - 1);
+    }
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    return { data: data || [], count };
+  } catch {
+    let list = [...inMemoryJobLogs];
+    if (filters?.jobName) list = list.filter((j) => j.job_name === filters.jobName);
+    if (filters?.status) list = list.filter((j) => j.status === filters.status);
+    const total = list.length;
+    const offset = filters?.offset || 0;
+    const limit = filters?.limit || 20;
+    return { data: list.slice(offset, offset + limit), count: total };
   }
-
-  return { data: data || [], count };
 }
 
 /**
  * Get the latest job log for a specific job name
  */
 export async function getLatestBackgroundJobLog(jobName: string) {
-  const { data, error } = await supabase
-    .from('background_job_logs')
-    .select('*')
-    .eq('job_name', jobName)
-    .order('started_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
-    console.error('Error fetching latest job log:', error);
+  if (!isSupabaseConfigured()) {
+    const found = inMemoryJobLogs
+      .filter((j) => j.job_name === jobName)
+      .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())[0];
+    return found || null;
   }
 
-  return data || null;
+  try {
+    const { data, error } = await supabase
+      .from('background_job_logs')
+      .select('*')
+      .eq('job_name', jobName)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.warn('[Supabase] Error fetching latest job log, checking memory:', error);
+      return inMemoryJobLogs.find((j) => j.job_name === jobName) || null;
+    }
+
+    return data || inMemoryJobLogs.find((j) => j.job_name === jobName) || null;
+  } catch {
+    return inMemoryJobLogs.find((j) => j.job_name === jobName) || null;
+  }
 }
 
 /**
  * Get a profile setting by key
  */
 export async function getProfileSetting(key: string): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('profile')
-    .select('value')
-    .eq('key', key)
-    .single();
+  if (!isSupabaseConfigured()) {
+    return getProfileSettingLocal(key);
+  }
 
-  if (error || !data) return null;
-  return data.value;
+  try {
+    const { data, error } = await supabase
+      .from('profile')
+      .select('value')
+      .eq('key', key)
+      .single();
+
+    if (error || !data) return getProfileSettingLocal(key);
+    return data.value;
+  } catch {
+    return getProfileSettingLocal(key);
+  }
 }
 
 /**
  * Set a profile setting (upsert)
  */
 export async function setProfileSetting(key: string, value: string) {
-  const { data, error } = await supabase
-    .from('profile')
-    .upsert(
-      { key, value, updated_at: new Date().toISOString() },
-      { onConflict: 'key' }
-    )
-    .select()
-    .single();
+  setProfileSettingLocal(key, value);
 
-  if (error) {
-    console.error('Error saving profile setting:', error);
-    throw error;
+  if (!isSupabaseConfigured()) {
+    return { key, value };
   }
 
-  return data;
+  try {
+    const { data, error } = await supabase
+      .from('profile')
+      .upsert(
+        { key, value, updated_at: new Date().toISOString() },
+        { onConflict: 'key' }
+      )
+      .select()
+      .single();
+
+    if (error) return { key, value };
+    return data;
+  } catch {
+    return { key, value };
+  }
 }
 
 /**
  * Get emiten summary statistics for hit targets
  */
 export async function getEmitenSummaryStats(limit: number = 5) {
-  // 1. Get all successful analysis records
-  // We need to fetch enough records to cover the 'limit' for each emiten
-  // Since we don't know which emitens have recent data, we'll fetch a larger set first
-  const { data, error } = await supabase
-    .from('stock_queries')
-    .select('emiten, sector, target_realistis, target_max, max_harga, status, from_date, bandar')
-    .eq('status', 'success')
-    .order('from_date', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching summary stats:', error);
-    throw error;
+  if (!isSupabaseConfigured()) {
+    return getEmitenSummaryStatsLocal(limit);
   }
 
-  // 2. Aggregate data per emiten
-  const emitenGroups: Record<string, any[]> = {};
-  data.forEach(record => {
-    if (!emitenGroups[record.emiten]) {
-      emitenGroups[record.emiten] = [];
-    }
-    if (emitenGroups[record.emiten].length < limit) {
-      emitenGroups[record.emiten].push(record);
-    }
-  });
+  try {
+    const { data, error } = await supabase
+      .from('stock_queries')
+      .select('emiten, sector, target_realistis, target_max, max_harga, status, from_date, bandar')
+      .eq('status', 'success')
+      .order('from_date', { ascending: false });
 
-  // 3. Calculate stats for each emiten
-  const stats = Object.entries(emitenGroups).map(([emiten, records]) => {
-    const tradingDays = records.length;
-    let hitR1 = 0;
-    let hitMax = 0;
-    const sector = records[0]?.sector; // Take sector from latest record
+    if (error) {
+      console.warn('[Supabase Fallback] getEmitenSummaryStats fallback to local store:', error);
+      return getEmitenSummaryStatsLocal(limit);
+    }
 
-    // Calculate bandar frequencies
-    const bandarCounts: Record<string, number> = {};
-    
-    records.forEach(r => {
-      if (r.max_harga && r.target_realistis && r.max_harga >= r.target_realistis) {
-        hitR1++;
+    // 2. Aggregate data per emiten
+    const emitenGroups: Record<string, any[]> = {};
+    data.forEach(record => {
+      if (!emitenGroups[record.emiten]) {
+        emitenGroups[record.emiten] = [];
       }
-      if (r.max_harga && r.target_max && r.max_harga >= r.target_max) {
-        hitMax++;
-      }
-      
-      if (r.bandar) {
-        bandarCounts[r.bandar] = (bandarCounts[r.bandar] || 0) + 1;
+      if (emitenGroups[record.emiten].length < limit) {
+        emitenGroups[record.emiten].push(record);
       }
     });
 
-    // Get top 3 bandar with counts
-    const topBandars = Object.entries(bandarCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([name, count]) => ({ name, count }));
+    // 3. Calculate stats for each emiten
+    const stats = Object.entries(emitenGroups).map(([emiten, records]) => {
+      const tradingDays = records.length;
+      let hitR1 = 0;
+      let hitMax = 0;
+      const sector = records[0]?.sector;
 
-    const hitRateR1 = (hitR1 / tradingDays) * 100;
-    const hitRateMax = (hitMax / tradingDays) * 100;
-    const totalHitRate = (hitRateR1 + hitRateMax) / 2;
+      const bandarCounts: Record<string, number> = {};
+      
+      records.forEach(r => {
+        if (r.max_harga && r.target_realistis && r.max_harga >= r.target_realistis) {
+          hitR1++;
+        }
+        if (r.max_harga && r.target_max && r.max_harga >= r.target_max) {
+          hitMax++;
+        }
+        
+        if (r.bandar) {
+          bandarCounts[r.bandar] = (bandarCounts[r.bandar] || 0) + 1;
+        }
+      });
 
-    return {
-      emiten,
-      sector,
-      tradingDays,
-      hitR1,
-      hitMax,
-      hitRateR1,
-      hitRateMax,
-      totalHitRate,
-      topBandars
-    };
-  });
+      const topBandars = Object.entries(bandarCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([name, count]) => ({ name, count }));
 
-  // 4. Sort by totalHitRate descending
-  return stats.sort((a, b) => b.totalHitRate - a.totalHitRate);
+      const hitRateR1 = tradingDays > 0 ? (hitR1 / tradingDays) * 100 : 0;
+      const hitRateMax = tradingDays > 0 ? (hitMax / tradingDays) * 100 : 0;
+      const totalHitRate = (hitRateR1 + hitRateMax) / 2;
+
+      return {
+        emiten,
+        sector,
+        tradingDays,
+        hitR1,
+        hitMax,
+        hitRateR1,
+        hitRateMax,
+        totalHitRate,
+        topBandars
+      };
+    });
+
+    return stats.sort((a, b) => b.totalHitRate - a.totalHitRate);
+  } catch (err) {
+    console.warn('[Supabase Fallback] getEmitenSummaryStats fallback to local store:', err);
+    return getEmitenSummaryStatsLocal(limit);
+  }
 }
 
 // ===== Watchlist Cache Functions =====
@@ -750,82 +1021,99 @@ import type { WatchlistGroup } from './types';
  * Check if there is any watchlist cache in the database
  */
 export async function hasWatchlistCache(): Promise<boolean> {
-  const { count, error } = await supabase
-    .from('watchlist_groups')
-    .select('*', { count: 'exact', head: true });
+  if (!isSupabaseConfigured()) {
+    return hasWatchlistCacheLocal();
+  }
 
-  if (error) return false;
-  return (count || 0) > 0;
+  try {
+    const { count, error } = await supabase
+      .from('watchlist_groups')
+      .select('*', { count: 'exact', head: true });
+
+    if (error) return hasWatchlistCacheLocal();
+    return (count || 0) > 0;
+  } catch {
+    return hasWatchlistCacheLocal();
+  }
 }
 
 /**
  * Get cached watchlist groups from local database
  */
 export async function getCachedWatchlistGroups(): Promise<{ groups: WatchlistGroup[]; synced_at: string | null }> {
-  const { data, error } = await supabase
-    .from('watchlist_groups')
-    .select('*')
-    .order('is_default', { ascending: false })
-    .order('name', { ascending: true });
-
-  if (error) {
-    console.error('Error fetching cached watchlist groups:', error);
-    return { groups: [], synced_at: null };
+  if (!isSupabaseConfigured()) {
+    return getCachedWatchlistGroupsLocal();
   }
 
-  const groups: WatchlistGroup[] = (data || []).map((row: any) => ({
-    watchlist_id: row.watchlist_id,
-    name: row.name,
-    description: row.description || '',
-    is_default: row.is_default || false,
-    is_favorite: row.is_favorite || false,
-    emoji: row.emoji || '',
-    category_type: row.category_type || '',
-    total_items: row.total_items || 0,
-  }));
+  try {
+    const { data, error } = await supabase
+      .from('watchlist_groups')
+      .select('*')
+      .order('is_default', { ascending: false })
+      .order('name', { ascending: true });
 
-  const synced_at = data?.[0]?.synced_at || null;
+    if (error) {
+      return getCachedWatchlistGroupsLocal();
+    }
 
-  return { groups, synced_at };
+    const groups: WatchlistGroup[] = (data || []).map((row: any) => ({
+      watchlist_id: row.watchlist_id,
+      name: row.name,
+      description: row.description || '',
+      is_default: row.is_default || false,
+      is_favorite: row.is_favorite || false,
+      emoji: row.emoji || '',
+      category_type: row.category_type || '',
+      total_items: row.total_items || 0,
+    }));
+
+    const synced_at = data?.[0]?.synced_at || null;
+    return { groups, synced_at };
+  } catch {
+    return getCachedWatchlistGroupsLocal();
+  }
 }
 
 /**
  * Save watchlist groups from Stockbit to local database (upsert)
  */
 export async function saveCachedWatchlistGroups(groups: WatchlistGroup[]): Promise<void> {
-  const now = new Date().toISOString();
-  const rows = groups.map(g => ({
-    watchlist_id: g.watchlist_id,
-    name: g.name,
-    description: g.description || '',
-    is_default: g.is_default || false,
-    is_favorite: g.is_favorite || false,
-    emoji: g.emoji || '',
-    category_type: g.category_type || '',
-    total_items: g.total_items || 0,
-    synced_at: now,
-  }));
+  saveCachedWatchlistGroupsLocal(groups);
 
-  const { error } = await supabase
-    .from('watchlist_groups')
-    .upsert(rows, { onConflict: 'watchlist_id' });
+  if (!isSupabaseConfigured()) return;
 
-  if (error) {
-    console.error('Error saving cached watchlist groups:', error);
-    throw error;
-  }
+  try {
+    const now = new Date().toISOString();
+    const rows = groups.map(g => ({
+      watchlist_id: g.watchlist_id,
+      name: g.name,
+      description: g.description || '',
+      is_default: g.is_default || false,
+      is_favorite: g.is_favorite || false,
+      emoji: g.emoji || '',
+      category_type: g.category_type || '',
+      total_items: g.total_items || 0,
+      synced_at: now,
+    }));
 
-  // Remove groups that no longer exist in Stockbit
-  const activeIds = groups.map(g => g.watchlist_id);
-  if (activeIds.length > 0) {
-    const { error: deleteError } = await supabase
+    const { error } = await supabase
       .from('watchlist_groups')
-      .delete()
-      .not('watchlist_id', 'in', `(${activeIds.join(',')})`);
+      .upsert(rows, { onConflict: 'watchlist_id' });
 
-    if (deleteError) {
-      console.error('Error cleaning up old watchlist groups:', deleteError);
+    if (error) {
+      console.warn('[Supabase] Error saving cached watchlist groups:', error);
+      return;
     }
+
+    const activeIds = groups.map(g => g.watchlist_id);
+    if (activeIds.length > 0) {
+      await supabase
+        .from('watchlist_groups')
+        .delete()
+        .not('watchlist_id', 'in', `(${activeIds.join(',')})`);
+    }
+  } catch {
+    // Graceful
   }
 }
 
@@ -833,53 +1121,58 @@ export async function saveCachedWatchlistGroups(groups: WatchlistGroup[]): Promi
  * Get cached watchlist items for a specific group
  */
 export async function getCachedWatchlistItems(watchlistId: number): Promise<{ items: any[]; synced_at: string | null }> {
-  // First get the internal group id
-  const { data: group, error: groupError } = await supabase
-    .from('watchlist_groups')
-    .select('id, synced_at')
-    .eq('watchlist_id', watchlistId)
-    .single();
-
-  if (groupError || !group) {
-    return { items: [], synced_at: null };
+  if (!isSupabaseConfigured()) {
+    return getCachedWatchlistItemsLocal(watchlistId);
   }
 
-  const { data, error } = await supabase
-    .from('watchlist_items')
-    .select(`
-      stockbit_item_id,
-      company_id,
-      symbol,
-      emiten_cache (
-        name,
-        sector,
-        last_price,
-        percent
-      )
-    `)
-    .eq('watchlist_group_id', group.id)
-    .order('symbol', { ascending: true });
+  try {
+    const { data: group, error: groupError } = await supabase
+      .from('watchlist_groups')
+      .select('id, synced_at')
+      .eq('watchlist_id', watchlistId)
+      .single();
 
-  if (error) {
-    console.error('Error fetching cached watchlist items:', error);
-    return { items: [], synced_at: null };
+    if (groupError || !group) {
+      return getCachedWatchlistItemsLocal(watchlistId);
+    }
+
+    const { data, error } = await supabase
+      .from('watchlist_items')
+      .select(`
+        stockbit_item_id,
+        company_id,
+        symbol,
+        emiten_cache (
+          name,
+          sector,
+          last_price,
+          percent
+        )
+      `)
+      .eq('watchlist_group_id', group.id)
+      .order('symbol', { ascending: true });
+
+    if (error) {
+      return getCachedWatchlistItemsLocal(watchlistId);
+    }
+
+    const items = (data || []).map((row: any) => ({
+      id: row.stockbit_item_id,
+      company_id: row.company_id,
+      symbol: row.symbol,
+      company_code: row.symbol,
+      company_name: row.emiten_cache?.name || '',
+      sector: row.emiten_cache?.sector || undefined,
+      last_price: row.emiten_cache?.last_price !== null && row.emiten_cache?.last_price !== undefined 
+        ? Number(row.emiten_cache.last_price) 
+        : 0,
+      percent: row.emiten_cache?.percent || '0',
+    }));
+
+    return { items, synced_at: group.synced_at };
+  } catch {
+    return getCachedWatchlistItemsLocal(watchlistId);
   }
-
-  // Map back to WatchlistItem-like format
-  const items = (data || []).map((row: any) => ({
-    id: row.stockbit_item_id,
-    company_id: row.company_id,
-    symbol: row.symbol,
-    company_code: row.symbol, // For compatibility
-    company_name: row.emiten_cache?.name || '',
-    sector: row.emiten_cache?.sector || undefined,
-    last_price: row.emiten_cache?.last_price !== null && row.emiten_cache?.last_price !== undefined 
-      ? Number(row.emiten_cache.last_price) 
-      : 0,
-    percent: row.emiten_cache?.percent || '0',
-  }));
-
-  return { items, synced_at: group.synced_at };
 }
 
 /**
@@ -889,88 +1182,78 @@ export async function saveCachedWatchlistItems(
   watchlistId: number,
   items: any[]
 ): Promise<void> {
-  // Get or create group record
-  const { data: group, error: groupError } = await supabase
-    .from('watchlist_groups')
-    .select('id')
-    .eq('watchlist_id', watchlistId)
-    .single();
+  saveCachedWatchlistItemsLocal(watchlistId, items);
 
-  if (groupError || !group) {
-    console.error('Group not found for watchlist_id:', watchlistId);
-    return;
-  }
+  if (!isSupabaseConfigured()) return;
 
-  const now = new Date().toISOString();
+  try {
+    const { data: group, error: groupError } = await supabase
+      .from('watchlist_groups')
+      .select('id')
+      .eq('watchlist_id', watchlistId)
+      .single();
 
-  // Insert/Update emiten data first
-  if (items.length > 0) {
-    const symbolsData = items.map((item: any) => ({
-      symbol: (item.symbol || item.company_code || '').toUpperCase(),
-      name: item.company_name || '',
-      sector: item.sector || null,
-      last_price: item.last_price ?? item.price ?? null,
-      percent: item.percent || String(item.change_percentage || '0'),
-      synced_at: now
-    }));
+    if (groupError || !group) return;
 
-    // Upsert into emiten_cache
-    const { error: emitenError } = await supabase
-      .from('emiten_cache')
-      .upsert(symbolsData, { onConflict: 'symbol' });
+    const now = new Date().toISOString();
 
-    if (emitenError) {
-      console.error('Error upserting emiten_cache:', emitenError);
-      throw emitenError;
+    if (items.length > 0) {
+      const symbolsData = items.map((item: any) => ({
+        symbol: (item.symbol || item.company_code || '').toUpperCase(),
+        name: item.company_name || '',
+        sector: item.sector || null,
+        last_price: item.last_price ?? item.price ?? null,
+        percent: item.percent || String(item.change_percentage || '0'),
+        synced_at: now
+      }));
+
+      await supabase
+        .from('emiten_cache')
+        .upsert(symbolsData, { onConflict: 'symbol' });
+
+      const watchlistRows = items.map((item: any) => ({
+        watchlist_group_id: group.id,
+        stockbit_item_id: String(item.id || ''),
+        company_id: item.company_id || null,
+        symbol: (item.symbol || item.company_code || '').toUpperCase(),
+      }));
+
+      await supabase.from('watchlist_items').delete().eq('watchlist_group_id', group.id);
+      await supabase.from('watchlist_items').insert(watchlistRows);
     }
 
-    // Associate with group
-    const watchlistRows = items.map((item: any) => ({
-      watchlist_group_id: group.id,
-      stockbit_item_id: String(item.id || ''),
-      company_id: item.company_id || null,
-      symbol: (item.symbol || item.company_code || '').toUpperCase(),
-    }));
-
-    // Reset items for this group and insert new associations
-    await supabase.from('watchlist_items').delete().eq('watchlist_group_id', group.id);
-
-    const { error: itemsError } = await supabase
-      .from('watchlist_items')
-      .insert(watchlistRows);
-
-    if (itemsError) {
-      console.error('Error saving cached watchlist items:', itemsError);
-      throw itemsError;
-    }
+    await supabase
+      .from('watchlist_groups')
+      .update({ synced_at: now })
+      .eq('id', group.id);
+  } catch {
+    // Graceful
   }
-
-  // Update group synced_at
-  await supabase
-    .from('watchlist_groups')
-    .update({ synced_at: now })
-    .eq('id', group.id);
 }
 
 /**
  * Delete a cached watchlist item by symbol from a group
  */
 export async function deleteCachedWatchlistItem(watchlistId: number, symbol: string): Promise<void> {
-  const { data: group } = await supabase
-    .from('watchlist_groups')
-    .select('id')
-    .eq('watchlist_id', watchlistId)
-    .single();
+  deleteCachedWatchlistItemLocal(watchlistId, symbol);
 
-  if (!group) return;
+  if (!isSupabaseConfigured()) return;
 
-  const { error } = await supabase
-    .from('watchlist_items')
-    .delete()
-    .eq('watchlist_group_id', group.id)
-    .eq('symbol', symbol.toUpperCase());
+  try {
+    const { data: group } = await supabase
+      .from('watchlist_groups')
+      .select('id')
+      .eq('watchlist_id', watchlistId)
+      .single();
 
-  if (error) {
-    console.error('Error deleting cached watchlist item:', error);
+    if (!group) return;
+
+    await supabase
+      .from('watchlist_items')
+      .delete()
+      .eq('watchlist_group_id', group.id)
+      .eq('symbol', symbol.toUpperCase());
+  } catch {
+    // Graceful
   }
 }

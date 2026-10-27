@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import type { BrokerFlowResponse, BrokerFlowActivity, BrokerFlowDailyData } from '@/lib/types';
 import { getBrokerInfo } from '@/lib/brokers';
 
+import type { HybridFlowReport } from '@/lib/broker-flow/types';
+
 interface BrokerFlowCardProps {
   emiten: string;
 }
@@ -94,6 +96,7 @@ export default function BrokerFlowCard({ emiten }: BrokerFlowCardProps) {
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState<BrokerFlowPeriodOption>('7D');
   const [selectedStatus, setSelectedStatus] = useState<string[]>(['Bandar', 'Whale', 'Retail', 'Mix']);
+  const [hybridFlow, setHybridFlow] = useState<HybridFlowReport | null>(null);
 
   useEffect(() => {
     if (!emiten) return;
@@ -112,6 +115,9 @@ export default function BrokerFlowCard({ emiten }: BrokerFlowCardProps) {
         }
         
         setData(json.data);
+        if (json.hybrid_flow) {
+          setHybridFlow(json.hybrid_flow);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Error fetching data');
       } finally {
@@ -191,6 +197,67 @@ export default function BrokerFlowCard({ emiten }: BrokerFlowCardProps) {
 
       {!loading && !error && data && (
         <div className="broker-flow-content">
+          {hybridFlow && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                padding: '0.65rem 0.9rem',
+                background: 'rgba(255, 255, 255, 0.02)',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                fontSize: '0.75rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span
+                  style={{
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    fontWeight: '700',
+                    fontSize: '0.7rem',
+                    textTransform: 'uppercase',
+                    background:
+                      hybridFlow.overall_regime.includes('ACCUMULATION')
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : hybridFlow.overall_regime.includes('DISTRIBUTION')
+                        ? 'rgba(244, 63, 94, 0.15)'
+                        : 'rgba(148, 163, 184, 0.15)',
+                    color:
+                      hybridFlow.overall_regime.includes('ACCUMULATION')
+                        ? '#10b981'
+                        : hybridFlow.overall_regime.includes('DISTRIBUTION')
+                        ? '#f43f5e'
+                        : '#94a3b8',
+                    border: `1px solid ${
+                      hybridFlow.overall_regime.includes('ACCUMULATION')
+                        ? 'rgba(16, 185, 129, 0.3)'
+                        : hybridFlow.overall_regime.includes('DISTRIBUTION')
+                        ? 'rgba(244, 63, 94, 0.3)'
+                        : 'rgba(148, 163, 184, 0.3)'
+                    }`,
+                  }}
+                >
+                  {hybridFlow.overall_regime.replace('_', ' ')} (ADI: {hybridFlow.accumulation_intensity > 0 ? '+' : ''}{hybridFlow.accumulation_intensity.toFixed(2)})
+                </span>
+                <span style={{ color: '#94a3b8' }}>
+                  CR3 Spread: <strong style={{ color: '#f1f5f9' }}>{(hybridFlow.concentration.net_cr3_spread * 100).toFixed(1)}%</strong>
+                </span>
+              </div>
+
+              {hybridFlow.cost_basis.bandar_vwap > 0 && (
+                <div style={{ color: '#94a3b8' }}>
+                  Modal Bandar: <strong style={{ color: '#38bdf8' }}>Rp {hybridFlow.cost_basis.bandar_vwap.toLocaleString()}</strong>
+                  {' '}(<span style={{ color: hybridFlow.cost_basis.deviation_pct >= 0 ? '#10b981' : '#f59e0b' }}>
+                    {hybridFlow.cost_basis.deviation_pct >= 0 ? '+' : ''}{hybridFlow.cost_basis.deviation_pct}%
+                  </span>)
+                </div>
+              )}
+            </div>
+          )}
+
           {data.activities.length === 0 ? (
             <div style={{ padding: '1rem', textAlign: 'center', color: '#888' }}>
               No broker activity found for {emiten}

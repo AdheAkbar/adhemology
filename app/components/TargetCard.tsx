@@ -1,14 +1,27 @@
 'use client';
 
+import ScoreProbabilityBadge from './ScoreProbabilityBadge';
+import type { CalibratedProbability } from '@/lib/calibration/types';
+
 interface TargetCardProps {
   emiten: string;
   sector?: string;
   currentPrice: number;
   targetRealistis: number;
   targetMax: number;
+  rankScore?: number | null;
+  calibratedProbability?: CalibratedProbability | null;
 }
 
-export default function TargetCard({ emiten, sector, currentPrice, targetRealistis, targetMax }: TargetCardProps) {
+export default function TargetCard({
+  emiten,
+  sector,
+  currentPrice,
+  targetRealistis,
+  targetMax,
+  rankScore,
+  calibratedProbability,
+}: TargetCardProps) {
   const calculateGain = (target: number) => {
     const gain = ((target - currentPrice) / currentPrice) * 100;
     return `${gain >= 0 ? '+' : ''}${gain.toFixed(2)}`;
@@ -16,7 +29,12 @@ export default function TargetCard({ emiten, sector, currentPrice, targetRealist
 
   return (
     <div className="glass-card">
-      <h3>🎯 Target Prices</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ margin: 0 }}>🎯 Heuristic Target Ladder (T1 &amp; T_max)</h3>
+        <span style={{ fontSize: '0.7rem', color: '#94a3b8', padding: '2px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.05)' }}>
+          EMPIRICAL BENCHMARK
+        </span>
+      </div>
       <div style={{ marginTop: '0.5rem', marginBottom: '1rem' }}>
         <div style={{ fontSize: '1.25rem', fontWeight: '700', color: 'var(--accent-primary)' }}>
           {emiten}
@@ -93,6 +111,11 @@ export default function TargetCard({ emiten, sector, currentPrice, targetRealist
           </div>
         </div>
       </div>
+
+      <ScoreProbabilityBadge
+        rankScore={rankScore}
+        calibratedProbability={calibratedProbability}
+      />
     </div>
   );
 }
